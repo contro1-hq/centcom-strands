@@ -50,6 +50,7 @@ Approval-required tools must pause before execution:
 
 - send customer or external messages,
 - payments, refunds, payouts, invoices,
+- production WRITE operations to servers, databases, configs, feature flags, or infrastructure,
 - production deploys or migrations,
 - deletes or irreversible updates,
 - permission changes,
@@ -96,6 +97,7 @@ Redact secrets, tokens, PII, long documents, and full retrieved context. Store c
 ## Pattern 2: Simple Approval First
 
 For one operator or simple role routing, create a request before the risky action. Do not add Control Map until it is useful.
+For production WRITE, the agent can hold the capability, but the tool must pause before execution. Put the full reviewer context in the request: exact target, environment, requested change, reason, expected impact, rollback notes when available, and compact/redacted inputs.
 
 ```python
 import os
@@ -105,33 +107,42 @@ from strands import tool
 client = CentcomClient(api_key=os.environ["CENTCOM_API_KEY"])
 
 @tool
-def issue_refund(customer_id: str, amount_usd: float) -> dict:
-    run_id = os.getenv("STRANDS_RUN_ID", f"refund:{customer_id}")
+def write_production_config(service: str, key: str, value: str, reason: str) -> dict:
+    run_id = os.getenv("STRANDS_RUN_ID", f"prod-write:{service}:{key}")
     request = client.create_protocol_request({
-        "title": f"Approve refund of ${amount_usd:.2f} to {customer_id}?",
+        "title": f"Approve production WRITE to {service}?",
         "request_type": "approval",
         "correlation_id": run_id,
-        "external_request_id": f"strands:{run_id}:issue_refund",
+        "external_request_id": f"strands:{run_id}:write_production_config",
         "source": {"integration": "strands", "framework": "strands-agents", "run_id": run_id},
-        "routing": {"required_role": "support-manager", "priority": "normal"},
-        "actor": {"agent_id": os.getenv("CENTCOM_AGENT_ID", ""), "agent_name": "Strands support agent"},
+        "routing": {"required_role": "production-operator", "priority": "urgent"},
+        "actor": {"agent_id": os.getenv("CENTCOM_AGENT_ID", ""), "agent_name": "Strands production agent"},
         "context": {
-            "tool_name": "issue_refund",
-            "tool_input": {"customer_id": customer_id, "amount_usd": amount_usd},
-            "action_type": "refund",
+            "tool_name": "write_production_config",
+            "tool_input": {"service": service, "key": key, "value_preview": value[:200]},
+            "action_type": "production_write",
+            "environment": "production",
+            "target": f"service:{service}",
+            "requested_write": {
+                "operation": "update_config",
+                "service": service,
+                "key": key,
+                "value_preview": value[:200],
+            },
+            "summary": reason,
         },
         "continuation": {"mode": "decision", "webhook_url": os.environ["CENTCOM_CALLBACK_URL"]},
     })
 
     decision = client.wait_for_protocol_response(request["id"], timeout=600)
     if decision["status"] != "approved":
-        raise PermissionError(decision.get("message") or "Refund rejected by operator")
+        raise PermissionError(decision.get("message") or "Production WRITE rejected by operator")
 
-    result = billing.refund(customer_id=customer_id, amount_usd=amount_usd)
+    result = production_api.update_config(service=service, key=key, value=value)
     client.log_action(
-        action="strands.refund_completed",
-        summary=f"Refunded ${amount_usd:.2f} to {customer_id} after approval",
-        source={"integration": "strands", "workflow_id": "support-agent", "run_id": run_id},
+        action="strands.production_write_completed",
+        summary=f"Wrote {key} to production service {service} after approval",
+        source={"integration": "strands", "workflow_id": "production-agent", "run_id": run_id},
         outcome="success",
         correlation_id=run_id,
         in_reply_to={"type": "request", "id": request["id"]},
@@ -148,7 +159,7 @@ Use this when you want one central hook for named risky tools.
 ```python
 from strands.hooks import BeforeToolCallEvent
 
-RISKY_TOOLS = {"send_customer_email", "issue_refund", "update_crm", "deploy_release"}
+RISKY_TOOLS = {"write_production_config", "run_sql_write", "issue_refund", "update_crm", "deploy_release"}
 
 def approve_risky_tool(event: BeforeToolCallEvent):
     tool_name = event.tool_use["name"]
@@ -302,7 +313,7 @@ Register once per meaningful agent/runtime. Store the returned `agent_id` in `CE
 
 ```bash
 contro1 agents register \
-  --name "Support Strands Agent" \
+  --name "Production Strands Agent" \
   --type strands \
   --description "Strands agent using Contro1 approvals and audit logging"
 
@@ -317,13 +328,13 @@ Use this before editing Strands code. It proves API keys, routing, operator queu
 ```bash
 contro1 requests create \
   --type approval \
-  --question "Approve sending this test customer email?" \
+  --question "Approve this test production WRITE?" \
   --agent <agent_id> \
-  --role support-manager \
+  --role production-operator \
   --risk high \
-  --reason "Customer-visible Strands tool action" \
+  --reason "Strands agent wants WRITE access to update production config" \
   --correlation-id strands-test-run-001 \
-  --external-request-id strands:test-run-001:send_customer_email \
+  --external-request-id strands:test-run-001:write_production_config \
   --wait
 ```
 

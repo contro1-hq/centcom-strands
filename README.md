@@ -37,7 +37,7 @@ CENTCOM_AGENT_ID=agt_your_registered_agent
 Register the agent with the CLI:
 
 ```bash
-contro1 agents register --name "Support Strands Agent" --type strands
+contro1 agents register --name "Production Strands Agent" --type strands
 ```
 
 ## Patterns
@@ -45,31 +45,45 @@ contro1 agents register --name "Support Strands Agent" --type strands
 ### 1. Simple approval before a risky tool
 
 Start here. If one operator or one simple role can approve the action, you do not need Control Map first.
+This example gives the Strands agent WRITE capability, but pauses before the production write. The reviewer sees the target service, environment, requested change, reason, and enough context to approve or reject before anything is written.
 
 ```python
+import os
 from strands import tool
 from centcom import CentcomClient
 
 client = CentcomClient(api_key=os.environ["CENTCOM_API_KEY"])
 
 @tool
-def send_customer_email(customer_id: str, subject: str, body: str) -> dict:
+def write_production_config(service: str, key: str, value: str, reason: str) -> dict:
+    run_id = os.getenv("STRANDS_RUN_ID", f"prod-write:{service}:{key}")
     request = client.create_protocol_request({
-        "title": f"Send email to {customer_id}?",
+        "title": f"Approve production WRITE to {service}?",
         "request_type": "approval",
+        "correlation_id": run_id,
+        "external_request_id": f"strands:{run_id}:write_production_config",
         "source": {"integration": "strands", "framework": "strands-agents"},
-        "routing": {"required_role": "support-manager"},
+        "routing": {"required_role": "production-operator", "priority": "urgent"},
         "context": {
-            "tool_name": "send_customer_email",
-            "tool_input": {"customer_id": customer_id, "subject": subject},
-            "summary": body[:500],
+            "tool_name": "write_production_config",
+            "tool_input": {"service": service, "key": key, "value_preview": value[:200]},
+            "action_type": "production_write",
+            "environment": "production",
+            "target": f"service:{service}",
+            "requested_write": {
+                "operation": "update_config",
+                "service": service,
+                "key": key,
+                "value_preview": value[:200],
+            },
+            "summary": reason,
         },
         "continuation": {"mode": "decision", "webhook_url": os.environ["CENTCOM_CALLBACK_URL"]},
     })
     decision = client.wait_for_protocol_response(request["id"], timeout=600)
     if decision["status"] != "approved":
-        raise PermissionError("Email rejected by operator")
-    return email_api.send(customer_id, subject, body)
+        raise PermissionError("Production WRITE rejected by operator")
+    return production_api.update_config(service=service, key=key, value=value)
 ```
 
 ### 2. Log every autonomous tool call
@@ -90,7 +104,7 @@ def log_tool_call(event: AfterToolCallEvent):
         metadata={"tool_input": event.tool_use.get("input", {})},
     )
 
-agent = Agent(tools=[search_docs, send_customer_email], hooks=[log_tool_call])
+agent = Agent(tools=[search_docs, write_production_config], hooks=[log_tool_call])
 ```
 
 ### 3. Preview routing with Control Map
