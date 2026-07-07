@@ -268,13 +268,106 @@ Use these fields consistently:
 
 Audit-only actions go to `/audit-records`. Approval-required actions go to `/requests`. Complex routing previews go to `/requests/control-map`.
 
-## CLI Setup
+## CLI Setup And Use Cases
+
+Use the CLI when a developer, coding agent, CI job, or operator needs to test or operate the Strands integration without writing new code first.
+
+The CLI is useful for:
+
+- registering the Strands agent so requests and audit records are attributed to the right system,
+- manually testing the approval path before wiring it into a Strands tool,
+- previewing Control Map routing for high-risk role/quorum policies,
+- pulling evidence and traces after an approval,
+- using a scoped token in CI or a headless Strands runtime,
+- gating a local command for demos, deploy scripts, or operational runbooks.
+
+### 1. Sign in and inspect the workspace
 
 ```bash
 contro1 auth login
-contro1 agents register --name "Support Strands Agent" --type strands
-contro1 requests control-map --role finance --required-approvals 2 --approval-role finance --must-include-role cfo
+contro1 whoami
+contro1 doctor
+```
+
+For CI or a headless machine, use a scoped CLI token:
+
+```bash
+export CONTRO1_TOKEN=cco_cli_live_xxx
+contro1 whoami --scopes
+```
+
+### 2. Register the Strands agent
+
+Register once per meaningful agent/runtime. Store the returned `agent_id` in `CENTCOM_AGENT_ID` and pass it in approval/audit payloads.
+
+```bash
+contro1 agents register \
+  --name "Support Strands Agent" \
+  --type strands \
+  --description "Strands agent using Contro1 approvals and audit logging"
+
+contro1 agents list
+contro1 agents get <agent_id>
+```
+
+### 3. Test a simple one-operator approval
+
+Use this before editing Strands code. It proves API keys, routing, operator queue, decisions, and evidence work.
+
+```bash
+contro1 requests create \
+  --type approval \
+  --question "Approve sending this test customer email?" \
+  --agent <agent_id> \
+  --role support-manager \
+  --risk high \
+  --reason "Customer-visible Strands tool action" \
+  --correlation-id strands-test-run-001 \
+  --external-request-id strands:test-run-001:send_customer_email \
+  --wait
+```
+
+If this works, implement the same pattern inside the risky Strands `@tool` or `BeforeToolCallEvent` hook.
+
+### 4. Preview Control Map only when routing matters
+
+Use Control Map for high-risk, quorum, role-specific, SLA, fallback reviewer, or separation-of-duties workflows. Do not add it to low-risk autonomous read/search/list actions.
+
+```bash
+contro1 requests control-map \
+  --role finance \
+  --required-approvals 2 \
+  --approval-role finance \
+  --must-include-role cfo \
+  --risk high \
+  --reason "Payment exceeds autonomous limit" \
+  --format json
+```
+
+If the preview is not satisfiable, fail closed in code and surface `warnings` or `suggested_action` to the admin/operator.
+
+### 5. Pull evidence and traces
+
+After the operator decides, pull the proof packet and run trail. This is useful for testing, incident review, and customer demos.
+
+```bash
 contro1 evidence for-request <request_id>
+contro1 traces for-request <request_id>
+contro1 agents trail <agent_id>
+```
+
+### 6. Optional: gate a local command
+
+This is not the main Strands runtime pattern, but it is useful for demos, migrations, deploys, or scripts around the agent.
+
+```bash
+contro1 run \
+  --agent <agent_id> \
+  --role release-manager \
+  --risk high \
+  --reason "Deploying Strands approval bridge" \
+  --requires-approval \
+  -- npm run deploy
 ```
 
 ## Reference Links
