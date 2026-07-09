@@ -47,7 +47,7 @@ def preview_finance_routing() -> dict[str, Any]:
     response.raise_for_status()
     preview = response.json()
     if not preview.get("satisfiable"):
-        raise RuntimeError(f"Routing not ready: {preview.get('warnings') or preview.get('suggested_action')}")
+        print("Routing setup needed:", preview.get("warnings") or preview.get("suggested_action"))
     return preview
 
 

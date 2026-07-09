@@ -109,7 +109,7 @@ agent = Agent(tools=[search_docs, write_production_config], hooks=[log_tool_call
 
 ### 3. Preview routing with Control Map
 
-Use Control Map before high-risk approvals, quorum approvals, required roles, separation of duties, or SLA/fallback workflows. Do not use it for every low-risk read/search/list action.
+Use Control Map when high-risk approvals, quorum approvals, required roles, separation of duties, or SLA/fallback workflows need a routing preview. Do not use it for every low-risk read/search/list action.
 
 ```bash
 contro1 requests control-map \
@@ -121,7 +121,7 @@ contro1 requests control-map \
   --reason "Payment exceeds autonomous limit"
 ```
 
-If the preview is not satisfiable, fail closed and show `warnings` or `suggested_action` to the operator/admin.
+If the preview is not satisfiable, treat it as routing context, not a denial; show `warnings` or `suggested_action` and let the approval request remain the gate.
 
 ### 4. Signed webhook handling
 

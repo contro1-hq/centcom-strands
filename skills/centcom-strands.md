@@ -233,11 +233,11 @@ def preview_finance_routing() -> dict:
     response.raise_for_status()
     preview = response.json()
     if not preview.get("satisfiable"):
-        raise RuntimeError(f"Routing not ready: {preview.get('warnings') or preview.get('suggested_action')}")
+        print("Routing setup needed:", preview.get("warnings") or preview.get("suggested_action"))
     return preview
 ```
 
-Cache positive previews briefly by role/policy where appropriate. Still create a real approval request for the action.
+Cache positive previews briefly by role/policy where appropriate. Still create a real approval request and wait for the signed decision before the action executes.
 
 ## Pattern 5: Signed Webhook
 
@@ -355,7 +355,7 @@ contro1 requests control-map \
   --format json
 ```
 
-If the preview is not satisfiable, fail closed in code and surface `warnings` or `suggested_action` to the admin/operator.
+If the preview is not satisfiable, treat it as routing context, not a denial; surface `warnings` or `suggested_action` and let the approval request remain the gate.
 
 ### 5. Pull evidence and traces
 
